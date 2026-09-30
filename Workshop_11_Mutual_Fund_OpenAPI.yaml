@@ -1,0 +1,1030 @@
+openapi: 3.0.3
+info:
+  title: Smart Mutual Fund Monitoring Platform
+  version: 1.0.0
+  description: Workshop 11 proposed API contract. Fictional examples; no live service.
+    HTTPS, JSON and bearer authentication. GET operations have no body; unsupported
+    query parameters and unknown request body properties return 400. Decimal values
+    use strings; null means unavailable. Dates are ISO and timestamps UTC. All operations
+    require funds:read; alert creation additionally requires alerts:write. Server
+    enforces authorization and metric-dependent constraints. See the companion PDF
+    for source boundaries, state transitions and performance assumptions.
+servers:
+- url: https://api.example.com/api/v1
+  description: Illustrative host only; not deployed
+security:
+- bearerAuth: []
+paths:
+  /funds:
+    get:
+      operationId: searchFunds
+      summary: Search funds
+      description: 'Requires funds:read. Case-insensitive substring matching on name/code.
+        Filters combine with AND. Order by fundCode ascending. No results: empty array.
+        GET has no body.'
+      parameters:
+      - name: q
+        in: query
+        required: false
+        description: Trimmed search text; omit for all funds.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 100
+      - name: fundType
+        in: query
+        required: false
+        description: ''
+        schema: &id008
+          type: string
+          enum:
+          - equity
+          - fixed_income
+          - mixed
+          - money_market
+          - alternative
+      - name: riskLevel
+        in: query
+        required: false
+        description: ''
+        schema: &id009
+          type: integer
+          minimum: 1
+          maximum: 8
+      - name: limit
+        in: query
+        required: false
+        description: ''
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      - &id006
+        name: cursor
+        in: query
+        required: false
+        description: 'Snapshot-bound opaque cursor. Valid for 15 minutes; keep filters
+          and limit unchanged. Expired/invalid cursor: 400.'
+        schema:
+          type: string
+          maxLength: 2048
+      responses:
+        '200':
+          description: Success
+          headers:
+            X-Request-Id:
+              description: Correlation ID also present in error.requestId.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+              example:
+                data:
+                - fundCode: ABC-EQ
+                  fundName: ABC Equity Fund
+                  fundType: equity
+                  currency: THB
+                  riskLevel: 6
+                page:
+                  limit: 20
+                  nextCursor: null
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '429':
+          $ref: '#/components/responses/Error429'
+        '500':
+          $ref: '#/components/responses/Error500'
+        '503':
+          $ref: '#/components/responses/Error503'
+  /funds/{fundCode}:
+    get:
+      operationId: getFundDetails
+      summary: Fund details
+      description: Requires funds:read. Latest accepted fund metadata. Nullable fields
+        denote unavailable data. No query parameters or request body.
+      parameters:
+      - &id002
+        name: fundCode
+        in: path
+        required: true
+        description: Canonical fund/share-class code.
+        schema: &id007
+          type: string
+          minLength: 1
+          maxLength: 32
+          pattern: ^[A-Z0-9-]+$
+      - &id003
+        name: If-None-Match
+        in: header
+        required: false
+        description: Return 304 without a body if this resource representation is
+          unchanged.
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Success
+          headers: &id001
+            X-Request-Id:
+              description: Correlation ID also present in error.requestId.
+              schema:
+                type: string
+            ETag:
+              description: Version validator including representation freshness.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetailsResponse'
+              example:
+                data:
+                  fundCode: ABC-EQ
+                  fundName: ABC Equity Fund
+                  managementCompany: ABC Asset Management
+                  fundType: equity
+                  currency: THB
+                  riskLevel: 6
+                  riskScheme: TH-1-8
+                  expenseRatioPct: '1.5000'
+                  feesAsOfDate: '2026-08-31'
+                  aum: '5200000000.00'
+                  aumAsOfDate: '2026-08-31'
+                  benchmark: Illustrative Equity Total Return Index
+                  sourceId: AMC-DEMO
+                  updatedAt: '2026-09-29T10:00:03Z'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '429':
+          $ref: '#/components/responses/Error429'
+        '500':
+          $ref: '#/components/responses/Error500'
+        '503':
+          $ref: '#/components/responses/Error503'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '304':
+          description: Unchanged representation; no response body.
+          headers: *id001
+  /funds/{fundCode}/nav:
+    get:
+      operationId: getLatestNav
+      summary: Latest NAV
+      description: 'Requires funds:read. Latest valuation date and accepted revision.
+        Previous NAV is the prior available valuation. navChangePct=(nav/previousNav-1)*100,
+        round half up to four places. Missing prior observation yields null changes.
+        Stale data returns 200 with isStale=true; freshness follows the source calendar/deadline/grace
+        policy. No NAV: 404 NAV_NOT_FOUND. No query parameters or request body.'
+      parameters:
+      - *id002
+      - *id003
+      responses:
+        '200':
+          description: Success
+          headers: &id004
+            X-Request-Id:
+              description: Correlation ID also present in error.requestId.
+              schema:
+                type: string
+            ETag:
+              description: Version validator including representation freshness.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NavResponse'
+              example:
+                data:
+                  fundCode: ABC-EQ
+                  currency: THB
+                  nav: '12.450000'
+                  previousNav: '12.300000'
+                  navChange: '0.150000'
+                  navChangePct: '1.2195'
+                  valuationDate: '2026-09-28'
+                  previousValuationDate: '2026-09-25'
+                  publishedAt: '2026-09-29T10:00:00Z'
+                  ingestedAt: '2026-09-29T10:00:02Z'
+                  updatedAt: '2026-09-29T10:00:03Z'
+                  sourceId: AMC-DEMO
+                  version: 1
+                  isStale: false
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '429':
+          $ref: '#/components/responses/Error429'
+        '500':
+          $ref: '#/components/responses/Error500'
+        '503':
+          $ref: '#/components/responses/Error503'
+        '404':
+          description: Unknown fund (FUND_NOT_FOUND) or no available NAV (NAV_NOT_FOUND).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: NAV_NOT_FOUND
+                  message: No published NAV is available
+                  details:
+                  - field: fundCode
+                    reason: no_observation
+                  requestId: req-003
+          headers:
+            X-Request-Id:
+              description: Correlation ID also present in error.requestId.
+              schema:
+                type: string
+        '304':
+          description: Unchanged representation; no response body.
+          headers: *id004
+  /funds/{fundCode}/nav/history:
+    get:
+      operationId: getHistoricalNav
+      summary: Historical NAV
+      description: 'Requires funds:read. Inclusive range, startDate<=endDate, maximum
+        366 calendar days. Ascending valuationDate, latest accepted revision as of
+        cursor snapshot. Missing dates omitted; known fund with no records returns
+        an empty array. Archive outage: 503. No request body.'
+      parameters:
+      - *id002
+      - name: startDate
+        in: query
+        required: true
+        description: ''
+        schema: &id005
+          type: string
+          format: date
+      - name: endDate
+        in: query
+        required: true
+        description: ''
+        schema: *id005
+      - name: limit
+        in: query
+        required: false
+        description: ''
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 100
+      - *id006
+      responses:
+        '200':
+          description: Success
+          headers:
+            X-Request-Id:
+              description: Correlation ID also present in error.requestId.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryResponse'
+              example:
+                fundCode: ABC-EQ
+                currency: THB
+                data:
+                - valuationDate: '2026-09-25'
+                  nav: '12.300000'
+                  publishedAt: '2026-09-28T10:00:00Z'
+                  sourceId: AMC-DEMO
+                  version: 1
+                - valuationDate: '2026-09-28'
+                  nav: '12.450000'
+                  publishedAt: '2026-09-29T10:00:00Z'
+                  sourceId: AMC-DEMO
+                  version: 1
+                page:
+                  limit: 100
+                  nextCursor: null
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '429':
+          $ref: '#/components/responses/Error429'
+        '500':
+          $ref: '#/components/responses/Error500'
+        '503':
+          $ref: '#/components/responses/Error503'
+        '404':
+          $ref: '#/components/responses/Error404'
+  /funds/compare:
+    get:
+      operationId: compareFunds
+      summary: Compare funds
+      description: 'Requires funds:read. Fixed route takes precedence over /funds/{fundCode}.
+        Use exact supplied date, or most recent common date within the last 366 days.
+        If none exists, asOfDate=null and each item has missing_nav. Return input
+        order. Missing NAV for a known fund: null NAV/change and missing_nav. Unknown
+        fund rejects entire request with 404; duplicate codes/unsupported currency:
+        400. Risk and fee metadata are current, not reconstructed. NAV changes may
+        span different valuation gaps and are not total returns. No path parameters
+        or request body.'
+      parameters:
+      - name: fundCodes
+        in: query
+        required: true
+        description: Comma-separated codes.
+        schema:
+          type: array
+          items: *id007
+          minItems: 2
+          maxItems: 5
+          uniqueItems: true
+        style: form
+        explode: false
+      - name: asOfDate
+        in: query
+        required: false
+        description: ''
+        schema: *id005
+      responses:
+        '200':
+          description: Success
+          headers:
+            X-Request-Id:
+              description: Correlation ID also present in error.requestId.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompareResponse'
+              example:
+                asOfDate: '2026-09-28'
+                data:
+                - fundCode: ABC-EQ
+                  currency: THB
+                  nav: '12.450000'
+                  navChangePct: '1.2195'
+                  riskLevel: 6
+                  expenseRatioPct: '1.5000'
+                  feesAsOfDate: '2026-08-31'
+                  dataStatus: available
+                - fundCode: XYZ-EQ
+                  currency: THB
+                  nav: '9.800000'
+                  navChangePct: '-0.5076'
+                  riskLevel: 6
+                  expenseRatioPct: '1.2000'
+                  feesAsOfDate: '2026-08-31'
+                  dataStatus: available
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '429':
+          $ref: '#/components/responses/Error429'
+        '500':
+          $ref: '#/components/responses/Error500'
+        '503':
+          $ref: '#/components/responses/Error503'
+        '404':
+          $ref: '#/components/responses/Error404'
+  /alerts:
+    post:
+      operationId: createAlert
+      summary: Create alert
+      description: 'Requires funds:read and alerts:write. Owner comes from bearer
+        identity. Channel must belong to the owner and be verified. Only newly ingested
+        current observations after creation can trigger; no immediate/backfill/correction
+        notifications. First eligible true condition may notify; later false-to-true
+        transitions require cooldown expiry. Null metric is not true. Idempotency
+        key scoped to user and retained 24h: identical body returns original 201,
+        different body returns 409. GET/list/update/delete alert operations are outside
+        this design.'
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        description: Per-user request deduplication key retained 24 hours.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      responses:
+        '201':
+          description: Created or idempotent replay
+          headers:
+            X-Request-Id:
+              description: Correlation ID also present in error.requestId.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertResponse'
+              example:
+                data:
+                  alertId: alert-001
+                  fundCode: ABC-EQ
+                  metric: nav
+                  operator: gte
+                  threshold: '13.000000'
+                  channel: push
+                  channelId: channel-001
+                  cooldownMinutes: 1440
+                  status: active
+                  createdAt: '2026-09-29T10:05:00Z'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '429':
+          $ref: '#/components/responses/Error429'
+        '500':
+          $ref: '#/components/responses/Error500'
+        '503':
+          $ref: '#/components/responses/Error503'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '415':
+          $ref: '#/components/responses/Error415'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAlertRequest'
+            example:
+              fundCode: ABC-EQ
+              metric: nav
+              operator: gte
+              threshold: '13.000000'
+              channel: push
+              channelId: channel-001
+              cooldownMinutes: 1440
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    FundSummary:
+      type: object
+      additionalProperties: false
+      required:
+      - fundCode
+      - fundName
+      - fundType
+      - currency
+      - riskLevel
+      properties:
+        fundCode: *id007
+        fundName: &id010
+          type: string
+        fundType: *id008
+        currency: &id011
+          type: string
+          enum:
+          - THB
+        riskLevel: *id009
+    FundDetails:
+      type: object
+      additionalProperties: false
+      required:
+      - fundCode
+      - fundName
+      - fundType
+      - currency
+      - riskLevel
+      - managementCompany
+      - riskScheme
+      - expenseRatioPct
+      - feesAsOfDate
+      - aum
+      - aumAsOfDate
+      - benchmark
+      - sourceId
+      - updatedAt
+      properties:
+        fundCode: *id007
+        fundName: *id010
+        fundType: *id008
+        currency: *id011
+        riskLevel: *id009
+        managementCompany:
+          type: string
+        riskScheme:
+          type: string
+          enum:
+          - TH-1-8
+        expenseRatioPct: &id016
+          type: string
+          pattern: ^[0-9]{1,5}(\.[0-9]{1,4})?$
+          nullable: true
+          description: Decimal string; up to 5 integer and 4 fractional digits. No
+            exponent notation.
+        feesAsOfDate: &id017
+          type: string
+          format: date
+          nullable: true
+        aum:
+          type: string
+          pattern: ^[0-9]{1,22}(\.[0-9]{1,2})?$
+          nullable: true
+          description: Decimal string; up to 22 integer and 2 fractional digits. No
+            exponent notation.
+        aumAsOfDate:
+          type: string
+          format: date
+          nullable: true
+        benchmark:
+          type: string
+          nullable: true
+        sourceId:
+          type: string
+        updatedAt: &id012
+          type: string
+          format: date-time
+    LatestNav:
+      type: object
+      additionalProperties: false
+      required:
+      - fundCode
+      - currency
+      - nav
+      - previousNav
+      - navChange
+      - navChangePct
+      - valuationDate
+      - previousValuationDate
+      - publishedAt
+      - ingestedAt
+      - updatedAt
+      - sourceId
+      - version
+      - isStale
+      properties:
+        fundCode: *id007
+        currency:
+          type: string
+          enum:
+          - THB
+        nav: &id013
+          type: string
+          pattern: ^[0-9]{1,12}(\.[0-9]{1,6})?$
+          nullable: false
+          description: Decimal string; up to 12 integer and 6 fractional digits. No
+            exponent notation.
+        previousNav:
+          type: string
+          pattern: ^[0-9]{1,12}(\.[0-9]{1,6})?$
+          nullable: true
+          description: Decimal string; up to 12 integer and 6 fractional digits. No
+            exponent notation.
+        navChange:
+          type: string
+          pattern: ^-?[0-9]{1,12}(\.[0-9]{1,6})?$
+          nullable: true
+          description: Decimal string; up to 12 integer and 6 fractional digits. No
+            exponent notation.
+        navChangePct: &id018
+          type: string
+          pattern: ^-?[0-9]{1,14}(\.[0-9]{1,4})?$
+          nullable: true
+          description: Decimal string; up to 14 integer and 4 fractional digits. No
+            exponent notation.
+        valuationDate: *id005
+        previousValuationDate:
+          type: string
+          format: date
+          nullable: true
+        publishedAt: *id012
+        ingestedAt: *id012
+        updatedAt: *id012
+        sourceId: &id014
+          type: string
+        version: &id015
+          type: integer
+          minimum: 1
+        isStale:
+          type: boolean
+    HistoryPoint:
+      type: object
+      additionalProperties: false
+      required:
+      - valuationDate
+      - nav
+      - publishedAt
+      - sourceId
+      - version
+      properties:
+        valuationDate: *id005
+        nav: *id013
+        publishedAt: *id012
+        sourceId: *id014
+        version: *id015
+    ComparisonItem:
+      type: object
+      additionalProperties: false
+      required:
+      - fundCode
+      - currency
+      - riskLevel
+      - expenseRatioPct
+      - feesAsOfDate
+      - nav
+      - navChangePct
+      - dataStatus
+      properties:
+        fundCode: *id007
+        currency: *id011
+        riskLevel: *id009
+        expenseRatioPct: *id016
+        feesAsOfDate: *id017
+        nav:
+          type: string
+          pattern: ^[0-9]{1,12}(\.[0-9]{1,6})?$
+          nullable: true
+          description: Decimal string; up to 12 integer and 6 fractional digits. No
+            exponent notation.
+        navChangePct: *id018
+        dataStatus:
+          type: string
+          enum:
+          - available
+          - missing_nav
+    CreateAlertRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - fundCode
+      - metric
+      - operator
+      - threshold
+      - channel
+      - channelId
+      properties:
+        fundCode: *id007
+        metric: &id019
+          type: string
+          enum:
+          - nav
+          - navChangePct
+        operator: &id020
+          type: string
+          enum:
+          - gte
+          - lte
+        threshold: &id021
+          type: string
+          pattern: ^-?[0-9]{1,14}(\.[0-9]{1,6})?$
+          nullable: false
+          description: 'Decimal string. For nav: positive Decimal(18,6). For navChangePct:
+            signed Decimal(18,4). Metric-specific constraints are enforced by the
+            service.'
+        channel: &id022
+          type: string
+          enum:
+          - push
+          - email
+        channelId: &id023
+          type: string
+          minLength: 1
+        cooldownMinutes: &id024
+          type: integer
+          minimum: 1
+          maximum: 10080
+          default: 1440
+    Alert:
+      type: object
+      additionalProperties: false
+      required:
+      - fundCode
+      - metric
+      - operator
+      - threshold
+      - channel
+      - channelId
+      - cooldownMinutes
+      - alertId
+      - status
+      - createdAt
+      properties:
+        fundCode: *id007
+        metric: *id019
+        operator: *id020
+        threshold: *id021
+        channel: *id022
+        channelId: *id023
+        cooldownMinutes: *id024
+        alertId:
+          type: string
+        status:
+          type: string
+          enum:
+          - active
+          - disabled
+        createdAt: *id012
+    Page:
+      type: object
+      additionalProperties: false
+      required:
+      - limit
+      - nextCursor
+      properties:
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        nextCursor:
+          type: string
+          nullable: true
+          maxLength: 2048
+    Error:
+      type: object
+      additionalProperties: false
+      required:
+      - error
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required:
+          - code
+          - message
+          - details
+          - requestId
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required:
+                - field
+                - reason
+                properties:
+                  field:
+                    type: string
+                  reason:
+                    type: string
+            requestId:
+              type: string
+    SearchResponse:
+      type: object
+      additionalProperties: false
+      required:
+      - data
+      - page
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/FundSummary'
+        page:
+          $ref: '#/components/schemas/Page'
+    DetailsResponse:
+      type: object
+      additionalProperties: false
+      required:
+      - data
+      properties:
+        data:
+          $ref: '#/components/schemas/FundDetails'
+    NavResponse:
+      type: object
+      additionalProperties: false
+      required:
+      - data
+      properties:
+        data:
+          $ref: '#/components/schemas/LatestNav'
+    HistoryResponse:
+      type: object
+      additionalProperties: false
+      required:
+      - fundCode
+      - currency
+      - data
+      - page
+      properties:
+        fundCode: *id007
+        currency:
+          type: string
+          enum:
+          - THB
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryPoint'
+        page:
+          $ref: '#/components/schemas/Page'
+    CompareResponse:
+      type: object
+      additionalProperties: false
+      required:
+      - asOfDate
+      - data
+      properties:
+        asOfDate:
+          type: string
+          format: date
+          nullable: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComparisonItem'
+          minItems: 2
+          maxItems: 5
+    AlertResponse:
+      type: object
+      additionalProperties: false
+      required:
+      - data
+      properties:
+        data:
+          $ref: '#/components/schemas/Alert'
+  responses:
+    Error400:
+      description: Invalid parameters or JSON
+      headers:
+        X-Request-Id:
+          description: Correlation ID also present in error.requestId.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: INVALID_ARGUMENT
+              message: Invalid parameters or JSON
+              details: []
+              requestId: req-001
+    Error401:
+      description: Missing or invalid bearer token
+      headers:
+        X-Request-Id:
+          description: Correlation ID also present in error.requestId.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: UNAUTHENTICATED
+              message: Missing or invalid bearer token
+              details: []
+              requestId: req-001
+    Error403:
+      description: Insufficient permissions or invalid channel ownership/verification
+      headers:
+        X-Request-Id:
+          description: Correlation ID also present in error.requestId.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: FORBIDDEN
+              message: Insufficient permissions or invalid channel ownership/verification
+              details: []
+              requestId: req-001
+    Error404:
+      description: Requested fund does not exist
+      headers:
+        X-Request-Id:
+          description: Correlation ID also present in error.requestId.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: FUND_NOT_FOUND
+              message: Requested fund does not exist
+              details: []
+              requestId: req-001
+    Error409:
+      description: Idempotency key reused with a different body
+      headers:
+        X-Request-Id:
+          description: Correlation ID also present in error.requestId.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: IDEMPOTENCY_CONFLICT
+              message: Idempotency key reused with a different body
+              details: []
+              requestId: req-001
+    Error415:
+      description: Content-Type must be application/json
+      headers:
+        X-Request-Id:
+          description: Correlation ID also present in error.requestId.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: UNSUPPORTED_MEDIA_TYPE
+              message: Content-Type must be application/json
+              details: []
+              requestId: req-001
+    Error429:
+      description: Request quota exceeded
+      headers:
+        X-Request-Id:
+          description: Correlation ID also present in error.requestId.
+          schema:
+            type: string
+        Retry-After:
+          description: Seconds before retry.
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: RATE_LIMITED
+              message: Request quota exceeded
+              details: []
+              requestId: req-001
+    Error500:
+      description: Unexpected service failure
+      headers:
+        X-Request-Id:
+          description: Correlation ID also present in error.requestId.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: Unexpected service failure
+              details: []
+              requestId: req-001
+    Error503:
+      description: Service temporarily unavailable
+      headers:
+        X-Request-Id:
+          description: Correlation ID also present in error.requestId.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: SERVICE_UNAVAILABLE
+              message: Service temporarily unavailable
+              details: []
+              requestId: req-001
